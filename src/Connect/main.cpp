@@ -1,72 +1,101 @@
-/*********
-  Rui Santos & Sara Santos - Random Nerd Tutorials
-  Complete project details at https://RandomNerdTutorials.com/esp32-wi-fi-provisioning-ble-arduino/
+#include <WiFi.h>
+#include <WiFiProv.h>
+#include "nvs_flash.h"
 
-  Please read README.md file in this folder, or on the web: https://github.com/espressif/arduino-esp32/tree/master/libraries/WiFiProv/examples/WiFiProv
-  Note: This sketch takes up a lot of space for the app and may not be able to flash with default setting on some chips.
-  If you see Error like this: "Sketch too big"
-  In Arduino IDE go to: Tools > Partition scheme > chose anything that has more than 1.4MB APP
-   - for example "No OTA (2MB APP/2MB SPIFFS)"
-*********/
+// Proof of possession
+const char *pop = "abcd1234";
+// Device name
+const char *service_name = "PROV_123";
+// Optional SoftAP password (NULL = no password)
+const char *service_key = NULL;
 
-#include "WiFiProv.h"
-#include "WiFi.h"
+// Reset provisioning flag
+bool reset_provisioned = true;
 
-const char * pop = "abcd1234"; // Proof of possession - otherwise called a PIN - string provided by the device, entered by the user in the phone app
-const char * service_name = "PROV_123"; // Name of your device (the Espressif apps expects by default device name starting with "Prov_")
-const char * service_key = NULL; // Password used for SofAP method (NULL = no password needed)
-bool reset_provisioned = true; // When true the library will automatically delete previously provisioned data.
-
-// WARNING: SysProvEvent is called from a separate FreeRTOS task (thread)!
+// ===================
+// Event handler
+// ===================
 void SysProvEvent(arduino_event_t *sys_event) {
-  switch (sys_event->event_id) {
-    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-      Serial.print("\nConnected IP address : ");
-      Serial.println(IPAddress(sys_event->event_info.got_ip.ip_info.ip.addr));
-      break;
-    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: Serial.println("\nDisconnected. Connecting to the AP again... "); break;
-    case ARDUINO_EVENT_PROV_START:            Serial.println("\nProvisioning started\nGive Credentials of your access point using smartphone app"); break;
-    case ARDUINO_EVENT_PROV_CRED_RECV:
-    {
-      Serial.println("\nReceived Wi-Fi credentials");
-      Serial.print("\tSSID : ");
-      Serial.println((const char *)sys_event->event_info.prov_cred_recv.ssid);
-      Serial.print("\tPassword : ");
-      Serial.println((char const *)sys_event->event_info.prov_cred_recv.password);
-      break;
+    switch (sys_event->event_id) {
+        case ARDUINO_EVENT_PROV_START:
+            Serial.println("⚡ Provisioning started. Use smartphone app to configure Wi-Fi.");
+            break;
+
+        case ARDUINO_EVENT_PROV_CRED_RECV:
+            Serial.printf("📶 Received SSID: %s\n", sys_event->event_info.prov_cred_recv.ssid);
+            break;
+
+        case ARDUINO_EVENT_PROV_CRED_SUCCESS:
+            Serial.println("✅ Provisioning Successful!");
+            break;
+
+        case ARDUINO_EVENT_PROV_CRED_FAIL:
+            Serial.println("❌ Provisioning Failed. Check credentials and retry.");
+            break;
+
+        case ARDUINO_EVENT_PROV_END:
+            Serial.println("📌 Provisioning Ended.");
+            break;
+
+        default:
+            break;
     }
-    case ARDUINO_EVENT_PROV_CRED_FAIL:
-    {
-      Serial.println("\nProvisioning failed!\nPlease reset to factory and retry provisioning\n");
-      if (sys_event->event_info.prov_fail_reason == WIFI_PROV_STA_AUTH_ERROR) {
-        Serial.println("\nWi-Fi AP password incorrect");
-      } else {
-        Serial.println("\nWi-Fi AP not found....Add API \" nvs_flash_erase() \" before beginProvision()");
-      }
-      break;
-    }
-    case ARDUINO_EVENT_PROV_CRED_SUCCESS: Serial.println("\nProvisioning Successful"); break;
-    case ARDUINO_EVENT_PROV_END:          Serial.println("\nProvisioning Ends"); break;
-    default:                              break;
-  }
 }
 
+// ===================
+// Clear old provisioning
+// ===================
+void clearProvisioning() {
+    // Initialize NVS
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    // Erase all NVS data (Wi-Fi + BLE)
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    Serial.println("🧹 All previous Wi-Fi/BLE provisioning cleared!");
+}
+
+// ===================
+// Setup
+// ===================
 void setup() {
-  Serial.begin(115200);
-  
-  WiFi.onEvent(SysProvEvent);
+    Serial.begin(115200);
+    delay(3000); // wait for subsystems to stabilize
 
-  Serial.println("Begin Provisioning using BLE");
-  // Sample uuid that user can pass during provisioning using BLE
-  uint8_t uuid[16] = {0xb4, 0xdf, 0x5a, 0x1c, 0x3f, 0x6b, 0xf4, 0xbf,
-                      0xea, 0x4a, 0x82, 0x03, 0x04, 0x90, 0x1a, 0x02 };
-  WiFiProv.beginProvision(
-    WIFI_PROV_SCHEME_BLE, WIFI_PROV_SCHEME_HANDLER_FREE_BLE, WIFI_PROV_SECURITY_1, pop, service_name, service_key, uuid, reset_provisioned
-  );
-  log_d("ble qr");
-  WiFiProv.printQR(service_name, pop, "ble");
+   
+
+    // Register event handler
+    WiFi.onEvent(SysProvEvent);
+
+    // Ensure Wi-Fi is idle
+    WiFi.mode(WIFI_MODE_STA);
+    WiFi.disconnect(true);
+
+    Serial.println("🚀 Begin Provisioning using BLE");
+
+    // Start provisioning (BLE)
+    WiFiProv.beginProvision(
+        WIFI_PROV_SCHEME_BLE,
+        WIFI_PROV_SCHEME_HANDLER_FREE_BLE,
+        WIFI_PROV_SECURITY_1,
+        pop,
+        service_name,
+        service_key,
+        NULL,
+        reset_provisioned
+    );
+
+    // Print QR code to serial
+    WiFiProv.printQR(service_name, pop, "ble");
 }
 
+// ===================
+// Main loop
+// ===================
 void loop() {
-  
+    // Nothing needed here
 }
