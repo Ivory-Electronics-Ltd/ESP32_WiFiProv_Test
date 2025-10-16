@@ -5,7 +5,7 @@
 // Proof of possession
 const char *pop = "abcd1234";
 // Device name
-const char *service_name = "SENSORE_rDAQ"; // "PROV_123";
+const char *service_name = "PROV_123"; //"SENSORE_rDAQ"; // "PROV_123";
 // Optional SoftAP password (NULL = no password)
 const char *service_key = NULL;
 
@@ -24,7 +24,9 @@ void SysProvEvent(arduino_event_t *sys_event)
         break;
 
     case ARDUINO_EVENT_PROV_CRED_RECV:
+
         Serial.printf("Received SSID: %s\n", sys_event->event_info.prov_cred_recv.ssid);
+        Serial.printf("Received Password: %s\n", sys_event->event_info.prov_cred_recv.password);
         break;
 
     case ARDUINO_EVENT_PROV_CRED_SUCCESS:
@@ -71,9 +73,22 @@ void clearProvisioning()
 // ===================
 void setup()
 {
-
     Serial.begin(115200);
-    delay(3000); // wait for subsystems to stabilize
+    delay(3000);
+
+    Serial.println(__FILE__);
+
+    // Check available heap before starting BLE
+    Serial.printf("Free heap before BLE init: %d bytes\n", esp_get_free_heap_size());
+
+    // Initialize NVS first (required for BLE)
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
 
     // Register event handler
     WiFi.onEvent(SysProvEvent);
