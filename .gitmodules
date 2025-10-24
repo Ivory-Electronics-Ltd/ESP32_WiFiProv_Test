@@ -1,0 +1,3 @@
+[submodule "lib/WiFiProv-ESP32"]
+	path = lib/WiFiProv-ESP32
+	url = https://github.com/dzalf/WiFiProvisioner.git
